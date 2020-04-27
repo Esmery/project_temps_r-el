@@ -74,11 +74,10 @@ private:
     RT_TASK th_server;
     RT_TASK th_sendToMon;
     RT_TASK th_receiveFromMon;
-    RT_TASK th_openComRobot;
+    RT_TASK th_openAndControlComRobot;
     RT_TASK th_startRobot;
-    RT_TASK th_ControlComRobot;
     RT_TASK th_move;
-    RT_TASK th_Batterylevel;
+    RT_TASK th_batterylevel;
     
     /**********************************************************************/
     /* Mutex                                                              */
@@ -125,7 +124,7 @@ private:
     /**
      * @brief Thread opening communication with the robot.
      */
-    void OpenComRobot(void *arg);
+    void OpenAndControlComRobot(void *arg);
 
     /**
      * @brief Thread starting the communication with the robot.
