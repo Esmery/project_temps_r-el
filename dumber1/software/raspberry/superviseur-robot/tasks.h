@@ -65,7 +65,7 @@ private:
     ComMonitor monitor;
     ComRobot robot;
     int robotStarted = 0;
-    int withWatchdog = 0; 
+    int withWD = 0; 
     int move = MESSAGE_ROBOT_STOP;
     
     /**********************************************************************/
@@ -74,8 +74,9 @@ private:
     RT_TASK th_server;
     RT_TASK th_sendToMon;
     RT_TASK th_receiveFromMon;
-    RT_TASK th_openAndControlComRobot;
+    RT_TASK th_openComRobot;
     RT_TASK th_startRobot;
+    RT_TASK th_reloadWD;
     RT_TASK th_move;
     RT_TASK th_batterylevel;
     
@@ -86,7 +87,7 @@ private:
     RT_MUTEX mutex_robot;
     RT_MUTEX mutex_robotStarted;
     RT_MUTEX mutex_move;
-    RT_MUTEX mutex_withWatchdog;
+    RT_MUTEX mutex_withWD;
 
     /**********************************************************************/
     /* Semaphores                                                         */
@@ -95,6 +96,7 @@ private:
     RT_SEM sem_openComRobot;
     RT_SEM sem_serverOk;
     RT_SEM sem_startRobot;
+    RT_SEM sem_watchDog;
 
     /**********************************************************************/
     /* Message queues                                                     */
@@ -124,12 +126,17 @@ private:
     /**
      * @brief Thread opening communication with the robot.
      */
-    void OpenAndControlComRobot(void *arg);
+    void OpenComRobot(void *arg);
 
     /**
-     * @brief Thread starting the communication with the robot.
+     * @brief Thread starting the communication with the robot with watchdog ou not.
      */
     void StartRobotTask(void *arg);
+    
+    /**
+     * @brief Thread reloading the communication with the robot.
+     */
+    void ReloadWDTask(void *arg);
     
     
     /**

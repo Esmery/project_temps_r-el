@@ -20,13 +20,15 @@
 
 // Déclaration des priorités des taches
 #define PRIORITY_TSERVER 30
-#define PRIORITY_TOPENANDCONTROLCOMROBOT 23
+#define PRIORITY_TOPENCOMROBOT 23
 #define PRIORITY_TMOVE 20
 #define PRIORITY_TSENDTOMON 22
 #define PRIORITY_TRECEIVEFROMMON 25
 #define PRIORITY_TSTARTROBOT 20
-#define PRIORITY_TCAMERA 21
-#define PRIORITY_TBATTERYLEVEL 19
+#define PRIORITY_TRELOADWD 21
+#define PRIORITY_TCAMERA 10
+#define PRIORITY_TBATTERYLEVEL 21
+
 
 /*
  * Some remarks:
@@ -70,7 +72,7 @@ void Tasks::Init() {
         cerr << "Error mutex create: " << strerror(-err) << endl << flush;
         exit(EXIT_FAILURE);
     }
-     if (err = rt_mutex_create(&mutex_withWatchdog, NULL)) {
+     if (err = rt_mutex_create(&mutex_withWD, NULL)) {
         cerr << "Error mutex create: " << strerror(-err) << endl << flush;
         exit(EXIT_FAILURE);
     }
@@ -100,6 +102,11 @@ void Tasks::Init() {
         cerr << "Error semaphore create: " << strerror(-err) << endl << flush;
         exit(EXIT_FAILURE);
     }
+    if (err = rt_sem_create(&sem_watchDog, NULL, 0, S_FIFO)) {
+        cerr << "Error semaphore create: " << strerror(-err) << endl << flush;
+        exit(EXIT_FAILURE);
+    }
+  
     cout << "Semaphores created successfully" << endl << flush;
 
     /**************************************************************************************/
@@ -117,11 +124,15 @@ void Tasks::Init() {
         cerr << "Error task create: " << strerror(-err) << endl << flush;
         exit(EXIT_FAILURE);
     }
-    if (err = rt_task_create(&th_openAndControlComRobot, "th_openAndControlComRobot", 0, PRIORITY_TOPENANDCONTROLCOMROBOT, 0)) {
+    if (err = rt_task_create(&th_openComRobot, "th_openComRobot", 0, PRIORITY_TOPENCOMROBOT, 0)) {
         cerr << "Error task create: " << strerror(-err) << endl << flush;
         exit(EXIT_FAILURE);
     }
     if (err = rt_task_create(&th_startRobot, "th_startRobot", 0, PRIORITY_TSTARTROBOT, 0)) {
+        cerr << "Error task create: " << strerror(-err) << endl << flush;
+        exit(EXIT_FAILURE);
+    }
+     if (err = rt_task_create(&th_reloadWD, "th_reloadWD", 0, PRIORITY_TRELOADWD, 0)) {
         cerr << "Error task create: " << strerror(-err) << endl << flush;
         exit(EXIT_FAILURE);
     }
@@ -139,10 +150,6 @@ void Tasks::Init() {
     /* Message queues creation                                                            */
     /**************************************************************************************/
     if ((err = rt_queue_create(&q_messageToMon, "q_messageToMon", sizeof (Message*)*100, Q_UNLIMITED, Q_FIFO)) < 0) {
-        cerr << "Error msg queue create: " << strerror(-err) << endl << flush;
-        exit(EXIT_FAILURE);
-    }
-     if ((err = rt_queue_create(&q_messageToControlComRobot, "q_messageToControlComRobot", sizeof (Message*)*500, Q_UNLIMITED, Q_FIFO)) < 0) {
         cerr << "Error msg queue create: " << strerror(-err) << endl << flush;
         exit(EXIT_FAILURE);
     }
@@ -171,11 +178,15 @@ void Tasks::Run() {
         cerr << "Error task start: " << strerror(-err) << endl << flush;
         exit(EXIT_FAILURE);
     }
-    if (err = rt_task_start(&th_openAndControlComRobot, (void(*)(void*)) & Tasks::OpenAndControlComRobot, this)) {
+    if (err = rt_task_start(&th_openComRobot, (void(*)(void*)) & Tasks::OpenComRobot, this)) {
         cerr << "Error task start: " << strerror(-err) << endl << flush;
         exit(EXIT_FAILURE);
     }
     if (err = rt_task_start(&th_startRobot, (void(*)(void*)) & Tasks::StartRobotTask, this)) {
+        cerr << "Error task start: " << strerror(-err) << endl << flush;
+        exit(EXIT_FAILURE);
+    }
+     if (err = rt_task_start(&th_reloadWD, (void(*)(void*)) &  Tasks::ReloadWDTask, this)) {
         cerr << "Error task start: " << strerror(-err) << endl << flush;
         exit(EXIT_FAILURE);
     }
@@ -285,15 +296,17 @@ void Tasks::ReceiveFromMonTask(void *arg) {
         } else if (msgRcv->CompareID(MESSAGE_ROBOT_COM_OPEN)) {
             rt_sem_v(&sem_openComRobot);
         } else if (msgRcv->CompareID(MESSAGE_ROBOT_START_WITHOUT_WD)) {
-            rt_mutex_acquire(&mutex_move, TM_INFINITE);
-            withWatchdog =0;
-            rt_mutex_release(&mutex_move);
+            rt_mutex_acquire(&mutex_withWD, TM_INFINITE);
+            withWD = 0;
+            rt_mutex_release(&mutex_withWD);
             rt_sem_v(&sem_startRobot);
         } else if (msgRcv->CompareID(MESSAGE_ROBOT_START_WITH_WD)) {
-            rt_mutex_acquire(&mutex_move, TM_INFINITE);
-            withWatchdog =1;
-            rt_mutex_release(&mutex_move);
+            rt_mutex_acquire(&mutex_withWD, TM_INFINITE);
+            withWD = 1;
+            rt_mutex_release(&mutex_withWD);
+            
             rt_sem_v(&sem_startRobot);
+            
         } else if (msgRcv->CompareID(MESSAGE_ROBOT_GO_FORWARD) ||
                 msgRcv->CompareID(MESSAGE_ROBOT_GO_BACKWARD) ||
                 msgRcv->CompareID(MESSAGE_ROBOT_GO_LEFT) ||
@@ -311,7 +324,7 @@ void Tasks::ReceiveFromMonTask(void *arg) {
 /**
  * @brief Thread opening and controlling communication with the robot.
  */
-void Tasks::OpenAndControlComRobot(void *arg) {
+void Tasks::OpenComRobot(void *arg) {
     int status;
     int err;
     int cpt = 0;
@@ -342,40 +355,10 @@ void Tasks::OpenAndControlComRobot(void *arg) {
         }
         WriteInQueue(&q_messageToMon, msgSend); // msgSend will be deleted by sendToMon
         
-        while (cpt<3 && status!= 0) {
-            /*Recuperer les message returner de write apartir de la queue de controle com*/
-              cout << "wait msg to verify " << endl << flush;
+    
 
-              msg = ReadInQueue(&q_messageToControlComRobot);
-            /*verifier si les message retourner par Write de ComRobot sont messages d'erreur
-             si oui on incremente le compteur*/
-              string rs = msg->ToString();
-              cout << "retour de la fonction write " <<  rs << endl << flush;
-           if (msg->CompareID(id)){
-                
-                cpt =+ 1; 
-                cout << "error n°" << endl << flush;
-                cout << cpt; 
-                
-           }    
-           else{ cpt = 0;
-                 
-                cout << "valeur du compteur = " << cpt << endl << flush;
-           }
-               
-        }
-        cout << "Comunication lost " << endl << flush;
-
-        /*Send message to monitor*/
-
-        msg = new Message((MessageID) MESSAGE_MONITOR_LOST);
-        WriteInQueue(&q_messageToMon, msg);
-
-         // delete(msg);  
-        
     }
 }
-
 /**
  * @brief Thread starting the communication with the robot.
  */
@@ -392,13 +375,16 @@ void Tasks::StartRobotTask(void *arg) {
         Message * msgSend;
         int rs;
         
+        rt_sem_p(&sem_startRobot, TM_INFINITE);
         /*Recuperer la valeur qui definira si la Com sera avec ou sans watchdog*/
         rt_mutex_acquire(&mutex_move, TM_INFINITE);
-        rs =withWatchdog;
+        rs = withWD;
         rt_mutex_release(&mutex_move);
+        
+        cout << "valor da variable " << rs << endl;
         /*si la com est sans watchog rs = 0*/
         if (rs==0){
-            rt_sem_p(&sem_startRobot, TM_INFINITE);
+           
             cout << "Start robot without watchdog (";
             rt_mutex_acquire(&mutex_robot, TM_INFINITE);
             msgSend = robot.Write(robot.StartWithoutWD());
@@ -408,7 +394,7 @@ void Tasks::StartRobotTask(void *arg) {
             cout << ")" << endl;
 
             cout << "Movement answer: " << msgSend->ToString() << endl << flush;
-            WriteInQueue(&q_messageToControlComRobot,msgSend);
+          //  WriteInQueue(&q_messageToControlComRobot,msgSend);
             WriteInQueue(&q_messageToMon, msgSend);  // msgSend will be deleted by sendToMon
             
 
@@ -421,17 +407,17 @@ void Tasks::StartRobotTask(void *arg) {
        }
         /*si la com est sans watchog rs = 0*/
        if (rs == 1){
-         rt_sem_p(&sem_startRobot, TM_INFINITE);
+         
          cout << "Start robot with watchdog (";
          rt_mutex_acquire(&mutex_robot, TM_INFINITE);
          msgSend = robot.Write(robot.StartWithWD());
          rt_mutex_release(&mutex_robot);
-        
+         rt_sem_v(&sem_watchDog);
          cout << msgSend->GetID();
          cout << ")" << endl;
          /*Reponse pour le monitor*/
          cout << "Movement answer: " << msgSend->ToString() << endl << flush;
-         WriteInQueue(&q_messageToControlComRobot, msgSend);
+        // WriteInQueue(&q_messageToControlComRobot, msgSend);
          WriteInQueue(&q_messageToMon, msgSend);  // msgSend will be deleted by sendToMon
          
          if (msgSend->GetID() == MESSAGE_ANSWER_ACK) {
@@ -444,7 +430,44 @@ void Tasks::StartRobotTask(void *arg) {
        }
     }
 }
+void Tasks::ReloadWDTask(void *arg) {
+    int wd;
+    MessageID reload =MESSAGE_ROBOT_RELOAD_WD;
+    
+   
+    Message * msgSend;
+    
+    // Synchronization barrier (waiting that all tasks are starting)
+    rt_sem_p(&sem_barrier, TM_INFINITE);
+    
+    /**************************************************************************************/
+    /* The task starts here                                                               */
+    /**************************************************************************************/
+    rt_sem_p(&sem_watchDog,TM_INFINITE);
+    if(rt_task_set_periodic(NULL, TM_NOW, 1000000000)!= 0){
+                printf("rt_task_set_periodc error");
+            }
+    while(1){
+        
+         rt_task_wait_period(NULL);
+         cout << "Periodic Reload update";
+           
+        cout << "reload watchdog " << endl << flush;
+        // ask to robot a reloading
+        rt_mutex_acquire(&mutex_robot, TM_INFINITE);
+        msgSend = robot.Write(robot.ReloadWD());
+        rt_mutex_release(&mutex_robot);
 
+        //WriteInQueue(&q_messageToControlComRobot, msgSend);
+        //send to monitor
+        cout << "robot answer about reloading " << msgSend->ToString() << endl << flush;
+        WriteInQueue(&q_messageToMon, msgSend );
+
+        
+        
+    }
+
+} 
 /**
  * @brief Thread handling control of the robot.
  */
@@ -475,10 +498,10 @@ void Tasks::MoveTask(void *arg) {
             
             cout << " move: " << cpMove;
             
-            rt_mutex_acquire(&mutex_robot, TM_INFINITE);
+           /* rt_mutex_acquire(&mutex_robot, TM_INFINITE);
             msgSend =robot.Write(new Message((MessageID)cpMove));
             rt_mutex_release(&mutex_robot);
-            WriteInQueue(&q_messageToControlComRobot, msgSend);
+           // WriteInQueue(&q_messageToControlComRobot, msgSend);*/
         }
         cout << endl << flush;
     }
@@ -518,7 +541,7 @@ void Tasks::BatterylevelTask(void *arg) {
             msgSend = (MessageBattery *)robot.Write(new Message((battery)));
             rt_mutex_release(&mutex_robot);
             
-            WriteInQueue(&q_messageToControlComRobot, msgSend);
+           // WriteInQueue(&q_messageToControlComRobot, msgSend);
             //envoyer au monitor
             WriteInQueue(&q_messageToMon, msgSend );
       
