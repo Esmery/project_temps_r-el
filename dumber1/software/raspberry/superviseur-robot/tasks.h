@@ -103,7 +103,7 @@ private:
     /**********************************************************************/
     int MSG_QUEUE_SIZE;
     RT_QUEUE q_messageToMon;
-    RT_QUEUE q_messageToControlComRobot;
+  
     
     /**********************************************************************/
     /* Tasks' functions                                                   */

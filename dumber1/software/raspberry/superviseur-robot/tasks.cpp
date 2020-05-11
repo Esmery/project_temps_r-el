@@ -304,7 +304,6 @@ void Tasks::ReceiveFromMonTask(void *arg) {
             rt_mutex_acquire(&mutex_withWD, TM_INFINITE);
             withWD = 1;
             rt_mutex_release(&mutex_withWD);
-            
             rt_sem_v(&sem_startRobot);
             
         } else if (msgRcv->CompareID(MESSAGE_ROBOT_GO_FORWARD) ||
@@ -394,7 +393,7 @@ void Tasks::StartRobotTask(void *arg) {
             cout << ")" << endl;
 
             cout << "Movement answer: " << msgSend->ToString() << endl << flush;
-          //  WriteInQueue(&q_messageToControlComRobot,msgSend);
+          
             WriteInQueue(&q_messageToMon, msgSend);  // msgSend will be deleted by sendToMon
             
 
@@ -405,7 +404,7 @@ void Tasks::StartRobotTask(void *arg) {
             }
         
        }
-        /*si la com est sans watchog rs = 0*/
+        /*si la com est avec watchdog rs = 1*/
        if (rs == 1){
          
          cout << "Start robot with watchdog (";
@@ -417,7 +416,7 @@ void Tasks::StartRobotTask(void *arg) {
          cout << ")" << endl;
          /*Reponse pour le monitor*/
          cout << "Movement answer: " << msgSend->ToString() << endl << flush;
-        // WriteInQueue(&q_messageToControlComRobot, msgSend);
+        
          WriteInQueue(&q_messageToMon, msgSend);  // msgSend will be deleted by sendToMon
          
          if (msgSend->GetID() == MESSAGE_ANSWER_ACK) {
@@ -431,26 +430,23 @@ void Tasks::StartRobotTask(void *arg) {
     }
 }
 void Tasks::ReloadWDTask(void *arg) {
-    int wd;
-    MessageID reload =MESSAGE_ROBOT_RELOAD_WD;
-    
-   
     Message * msgSend;
     
     // Synchronization barrier (waiting that all tasks are starting)
     rt_sem_p(&sem_barrier, TM_INFINITE);
-    
+    //watting a signal from startRobot (with WD)
+    rt_sem_p(&sem_watchDog,TM_INFINITE);
     /**************************************************************************************/
     /* The task starts here                                                               */
     /**************************************************************************************/
-    rt_sem_p(&sem_watchDog,TM_INFINITE);
-    if(rt_task_set_periodic(NULL, TM_NOW, 1000000000)!= 0){
-                printf("rt_task_set_periodc error");
-            }
+     if(rt_task_set_periodic(NULL, TM_NOW, 1000000000)!= 0){
+                printf("rt_task_set_periodc error");}
+           
     while(1){
+       
         
-         rt_task_wait_period(NULL);
-         cout << "Periodic Reload update";
+        rt_task_wait_period(NULL);
+        cout << "Periodic Reload update" << endl << flush;
            
         cout << "reload watchdog " << endl << flush;
         // ask to robot a reloading
@@ -458,10 +454,9 @@ void Tasks::ReloadWDTask(void *arg) {
         msgSend = robot.Write(robot.ReloadWD());
         rt_mutex_release(&mutex_robot);
 
-        //WriteInQueue(&q_messageToControlComRobot, msgSend);
         //send to monitor
         cout << "robot answer about reloading " << msgSend->ToString() << endl << flush;
-        WriteInQueue(&q_messageToMon, msgSend );
+        
 
         
         
@@ -498,10 +493,6 @@ void Tasks::MoveTask(void *arg) {
             
             cout << " move: " << cpMove;
             
-           /* rt_mutex_acquire(&mutex_robot, TM_INFINITE);
-            msgSend =robot.Write(new Message((MessageID)cpMove));
-            rt_mutex_release(&mutex_robot);
-           // WriteInQueue(&q_messageToControlComRobot, msgSend);*/
         }
         cout << endl << flush;
     }
@@ -540,8 +531,7 @@ void Tasks::BatterylevelTask(void *arg) {
             rt_mutex_acquire(&mutex_robot, TM_INFINITE);
             msgSend = (MessageBattery *)robot.Write(new Message((battery)));
             rt_mutex_release(&mutex_robot);
-            
-           // WriteInQueue(&q_messageToControlComRobot, msgSend);
+       
             //envoyer au monitor
             WriteInQueue(&q_messageToMon, msgSend );
       
