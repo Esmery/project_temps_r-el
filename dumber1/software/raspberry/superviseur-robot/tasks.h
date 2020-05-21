@@ -79,6 +79,7 @@ private:
     RT_TASK th_reloadWD;
     RT_TASK th_move;
     RT_TASK th_batterylevel;
+    RT_TASK th_reset;
     
     /**********************************************************************/
     /* Mutex                                                              */
@@ -153,6 +154,10 @@ private:
      * @brief Thread sending Battery Level.
      */
     void BatterylevelTask(void *arg);
+    /**
+     * @brief Thread reseting thread.
+     */
+    void ResetTask(void *arg);
     
     /**********************************************************************/
     /* Queue services                                                     */

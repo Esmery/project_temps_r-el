@@ -28,7 +28,7 @@
 #define PRIORITY_TRELOADWD 21
 #define PRIORITY_TCAMERA 10
 #define PRIORITY_TBATTERYLEVEL 21
-
+#define PRIORITY_TRESET 2
 
 /*
  * Some remarks:
@@ -143,7 +143,12 @@ void Tasks::Init() {
     if (err = rt_task_create(&th_batterylevel, "th_batterylevel", 0, PRIORITY_TBATTERYLEVEL, 0)) {
         cerr << "Error task create: " << strerror(-err) << endl << flush;
         exit(EXIT_FAILURE);
+    }    
+    if (err = rt_task_create(&th_reset, "th_reset", 0, PRIORITY_TRESET, 0)) {
+        cerr << "Error task create: " << strerror(-err) << endl << flush;
+        exit(EXIT_FAILURE);
     }
+
     cout << "Tasks created successfully" << endl << flush;
 
     /**************************************************************************************/
@@ -196,6 +201,11 @@ void Tasks::Run() {
     }
     
      if (err = rt_task_start(&th_batterylevel, (void(*)(void*)) & Tasks::BatterylevelTask, this)) {
+        cerr << "Error task start: " << strerror(-err) << endl << flush;
+        exit(EXIT_FAILURE);
+    }
+    
+   	if (err = rt_task_start(&th_reset, (void(*)(void*)) & Tasks::ResetTask, this)) {
         cerr << "Error task start: " << strerror(-err) << endl << flush;
         exit(EXIT_FAILURE);
     }
@@ -498,7 +508,80 @@ void Tasks::MoveTask(void *arg) {
     }
 }
 
+void Tasks::ResetTask(void *arg){
+    int compteur = 0;
+    int reset = false;
+	
+    // Synchronization barrier (waiting that all tasks are starting)
+    rt_sem_p(&sem_barrier, TM_INFINITE);
+    
+    /**************************************************************************************/
+    /* The task starts here                                                               */
+    /**************************************************************************************/
+    if(rt_task_set_periodic(NULL, TM_NOW, 500000000)!= 0){
+        printf("rt_task_set_periodc error");
+    }
+    
+    Message res;
+    Message msgToSend;
+         
+    while(1){
+        rt_task_wait_period(NULL);
+        cout << "Periodic Reset update";
+           
+        //Détecter la perte de connexion avec le moniteur
+        res = monitor.Read();
+        if(res.CompareID(MESSAGE_MONITOR_LOST)){
+            //Avertir de l'arrêt
+            cout << "Arrêt du robot" << endl;
+            rt_mutex_acquire(&mutex_move, TM_INFINITE);
+            move = robot.Stop();
+            rt_mutex_release(&mutex_move);
+            WriteInQueue(&q_messageToMon, robot.Stop() );
+             cout << "Arrêt de la communication avec le robot" << endl;
+            robot.Close();
+            
+            //Fermeture du serveur
+             cout << "Fermeture du serveur" << endl;
+            rt_mutex_acquire(&mutex_monitor, TM_INFINITE);
+            monitor.Close();
+          
 
+            //Redémarrage superviseur
+             cout << "Redmérrage du serveur" << endl;
+            monitor.Open(SERVER_PORT);
+            rt_mutex_release(&mutex_monitor);
+    
+            //Réouverture de la connection avec le robot
+             cout << "Réouverture de la connection avec le robot" << endl;
+            this->OpenComRobot();
+        }
+
+        //Détecter perte de connection avec le robot
+        res = robot.Write(MESSAGE_ROBOT_PING);
+
+        if(res.CompareID(MESSAGE_ANSWER_COM_ERROR) || res.CompareID(MESSAGE_ANSWER_ROBOT_TIMEOUT)){
+            compteur++;
+            if(compteur >= 3) reset = true;
+
+            //Avertir de l'arrêt
+            WriteInQueue(&q_messageToMon, robot.Stop() );
+            robot.Close();
+
+            //Réouverture de la connection avec le robot
+            this->OpenComRobot();
+            //Reset
+            /*robot.Reset();
+            msgToSend = new Message(MESSAGE_ROBOT_RESET);
+            WriteInQueue(&q_messageToMon, msgToSend );*/
+
+        }else{
+            compteur = 0;
+        }
+
+    }
+	
+}
 
 void Tasks::BatterylevelTask(void *arg) {
     int rs;
