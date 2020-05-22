@@ -351,7 +351,8 @@ void Tasks::OpenComRobot(void *arg) {
         rt_sem_p(&sem_openComRobot, TM_INFINITE);
         cout << "Open serial com (";
         rt_mutex_acquire(&mutex_robot, TM_INFINITE);
-        status = robot.Open();
+       // status = robot.Open();
+        status = robot.Open("127.0.0.1",6699);
         rt_mutex_release(&mutex_robot);
         cout << status;
         cout << ")" << endl << flush;
@@ -522,8 +523,8 @@ void Tasks::ResetTask(void *arg){
         printf("rt_task_set_periodc error");
     }
     
-    Message res;
-    Message msgToSend;
+    Message * res;
+    Message * msgToSend;
          
     while(1){
         rt_task_wait_period(NULL);
@@ -531,11 +532,11 @@ void Tasks::ResetTask(void *arg){
            
         //Détecter la perte de connexion avec le moniteur
         res = monitor.Read();
-        if(res.CompareID(MESSAGE_MONITOR_LOST)){
+        if(res->CompareID(MESSAGE_MONITOR_LOST)){
             //Avertir de l'arrêt
             cout << "Arrêt du robot" << endl;
             rt_mutex_acquire(&mutex_move, TM_INFINITE);
-            move = robot.Stop();
+            move = MESSAGE_ROBOT_STOP;
             rt_mutex_release(&mutex_move);
             WriteInQueue(&q_messageToMon, robot.Stop() );
              cout << "Arrêt de la communication avec le robot" << endl;
@@ -554,13 +555,14 @@ void Tasks::ResetTask(void *arg){
     
             //Réouverture de la connection avec le robot
              cout << "Réouverture de la connection avec le robot" << endl;
-            this->OpenComRobot();
+             int a = 1;
+            this->OpenComRobot(&a);
         }
 
         //Détecter perte de connection avec le robot
-        res = robot.Write(MESSAGE_ROBOT_PING);
+        res = robot.Write(new Message(MESSAGE_ROBOT_PING));
 
-        if(res.CompareID(MESSAGE_ANSWER_COM_ERROR) || res.CompareID(MESSAGE_ANSWER_ROBOT_TIMEOUT)){
+        if(res->CompareID(MESSAGE_ANSWER_COM_ERROR) || res->CompareID(MESSAGE_ANSWER_ROBOT_TIMEOUT)){
             compteur++;
             if(compteur >= 3) reset = true;
 
@@ -569,7 +571,8 @@ void Tasks::ResetTask(void *arg){
             robot.Close();
 
             //Réouverture de la connection avec le robot
-            this->OpenComRobot();
+            int a = 1;
+            this->OpenComRobot(&a);
             //Reset
             /*robot.Reset();
             msgToSend = new Message(MESSAGE_ROBOT_RESET);
